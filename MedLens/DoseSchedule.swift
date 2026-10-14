@@ -27,11 +27,9 @@ nonisolated enum DoseState: Hashable, Sendable {
     case upcoming
     /// Within `dueWindow` of its time.
     case due
-    /// More than `dueWindow` past its time, not taken, and not yet replaced by the next dose.
+    /// More than `dueWindow` past its time and not taken. It stays on the list to take,
+    /// because the person may still take it later.
     case late
-    /// Not taken, and a later dose of the same medication is taken or already due.
-    /// Shown as missed (not late) so nobody is nudged into a double dose.
-    case missed
     case taken(at: Date)
 
     var isTaken: Bool {
@@ -43,7 +41,7 @@ nonisolated enum DoseState: Hashable, Sendable {
     var isPending: Bool {
         switch self {
         case .upcoming, .due, .late: return true
-        case .missed, .taken: return false
+        case .taken: return false
         }
     }
 }
@@ -81,16 +79,9 @@ nonisolated enum DoseSchedule {
     }
 
     /// The state of `dose`, given when each of the day's doses was taken (keyed by `Dose.id`).
-    static func state(of dose: Dose, among dayDoses: [Dose], takenAt: [String: Date], now: Date) -> DoseState {
+    static func state(of dose: Dose, takenAt: [String: Date], now: Date) -> DoseState {
         if let time = takenAt[dose.id] {
             return .taken(at: time)
-        }
-
-        let laterSameMedication = dayDoses.filter {
-            $0.medication.id == dose.medication.id && $0.scheduled > dose.scheduled
-        }
-        if laterSameMedication.contains(where: { takenAt[$0.id] != nil || $0.scheduled <= now }) {
-            return .missed
         }
 
         let untilDose = dose.scheduled.timeIntervalSince(now)
@@ -99,23 +90,20 @@ nonisolated enum DoseSchedule {
         return .late
     }
 
-    /// Today's list: doses still to take first (earliest on top), then taken, then missed.
+    /// Today's list: doses still to take first (earliest on top), then taken ones.
     static func ordered(_ dayDoses: [Dose], takenAt: [String: Date], now: Date) -> [(dose: Dose, state: DoseState)] {
-        let withStates = dayDoses.map { ($0, state(of: $0, among: dayDoses, takenAt: takenAt, now: now)) }
-        let pending = withStates.filter { $0.1.isPending }
-        let taken = withStates.filter { $0.1.isTaken }
-        let missed = withStates.filter { $0.1 == .missed }
-        return (pending + taken + missed).map { (dose: $0.0, state: $0.1) }
+        let withStates = dayDoses.map { (dose: $0, state: state(of: $0, takenAt: takenAt, now: now)) }
+        return withStates.filter { $0.state.isPending } + withStates.filter { $0.state.isTaken }
     }
 
-    /// Decides what a scan of `medication` should do now. Never checks more than one dose,
-    /// and when an earlier dose was skipped it checks the current one, not the skipped one,
-    /// so the next scheduled dose is never left looking untaken.
+    /// Decides what a scan of `medication` should do now. Never checks more than one dose.
+    /// If several untaken doses could fit, it checks the one closest to now, so the dose
+    /// that is currently due is never left looking untaken.
     static func scanOutcome(for medication: Medication, dayDoses: [Dose], takenAt: [String: Date], now: Date) -> ScanOutcome {
         let doses = dayDoses.filter { $0.medication.id == medication.id }
         guard !doses.isEmpty else { return .notScheduledToday(medication) }
 
-        let states = doses.map { (dose: $0, state: state(of: $0, among: dayDoses, takenAt: takenAt, now: now)) }
+        let states = doses.map { (dose: $0, state: state(of: $0, takenAt: takenAt, now: now)) }
 
         // The latest pending dose that is due, late, or at most `earlyWindow` away.
         let checkable = states.filter {
@@ -133,7 +121,6 @@ nonisolated enum DoseSchedule {
         if let next {
             return .tooEarly(next: next)
         }
-        // Only missed doses remain: treat like nothing more to take today.
         return .notScheduledToday(medication)
     }
 }

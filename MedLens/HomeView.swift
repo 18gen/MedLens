@@ -171,14 +171,11 @@ private struct TodayCard: View {
     @ViewBuilder
     private func rows(_ items: [(dose: Dose, state: DoseState)]) -> some View {
         let firstTakenIndex = items.firstIndex { $0.state.isTaken }
-        let firstMissedIndex = items.firstIndex { $0.state == .missed }
 
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(items.enumerated()), id: \.element.dose.id) { index, item in
                 if index == firstTakenIndex {
                     sectionHeader("Taken", isFirst: index == 0)
-                } else if index == firstMissedIndex {
-                    sectionHeader("Missed", isFirst: index == 0)
                 } else if index > 0 {
                     Divider()
                 }
@@ -272,7 +269,7 @@ private struct DoseRow: View {
     }
 }
 
-/// "in 2 hr", "Now", "1 hr late", "Missed", or the time it was taken ("8:02 AM").
+/// "in 2 hr", "Now", "1 hr late", or the time it was taken ("8:02 AM").
 private struct DoseStatusText: View {
     let state: DoseState
     let scheduled: Date
@@ -286,8 +283,6 @@ private struct DoseStatusText: View {
             label("Now", color: Palette.due, weight: .bold)
         case .late:
             label("\(Self.duration(now.timeIntervalSince(scheduled))) late", color: Palette.late, weight: .bold)
-        case .missed:
-            label("Missed", color: Color(white: 0.45))
         case .taken(let time):
             // The "Taken" section header says what this time means.
             label(time.formatted(date: .omitted, time: .shortened), color: Palette.taken, weight: .bold)
@@ -319,7 +314,6 @@ private struct DoseStatusText: View {
         case .upcoming: return "Not taken. Due in \(spoken(scheduled.timeIntervalSince(now)))"
         case .due: return "Not taken. Due now"
         case .late: return "Not taken. \(spoken(now.timeIntervalSince(scheduled))) late"
-        case .missed: return "Missed"
         case .taken(let time): return "Taken at \(time.formatted(date: .omitted, time: .shortened))"
         }
     }
