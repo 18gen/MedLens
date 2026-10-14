@@ -7,16 +7,27 @@
 
 import SwiftUI
 
-/// The whole app: a white page with one camera button. Tapping it grows the button's
-/// black circle into the live camera view; the same button then becomes the close button.
+/// The whole app: today's medications above one camera button. Tapping it grows the
+/// button's black circle into the live camera view; the same button then closes it.
 struct ContentView: View {
     @State private var isScanning = false
     @State private var model = ScannerModel()
+    @State private var store = MedicationStore()
 
     var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .bottom) {
                 Color.white.ignoresSafeArea()
+
+                if !isScanning {
+                    HomeView(store: store)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+                        // Keep clear of the "Scan Label" hint and button.
+                        .padding(.bottom, CameraButton.homeReservedHeight)
+                        .frame(maxHeight: .infinity, alignment: .top)
+                        .transition(CameraButton.hintTransition)
+                }
 
                 if isScanning {
                     ScanResultView(model: model)
@@ -58,8 +69,11 @@ struct CameraButton: View {
     /// plus 24pt inside it, so the button sits at the same spot on both screens.
     static let bottomInset: CGFloat = 34
 
+    /// Height at the bottom of the home screen used by the hint and button.
+    static let homeReservedHeight: CGFloat = 170
+
     /// Leave quickly as the camera grows; return once it has shrunk back.
-    private static let hintTransition = AnyTransition.asymmetric(
+    static let hintTransition = AnyTransition.asymmetric(
         insertion: .opacity.animation(.easeIn(duration: 0.25).delay(0.3)),
         removal: .opacity.animation(.easeOut(duration: 0.12))
     )
