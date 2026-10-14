@@ -29,6 +29,8 @@ private struct HomeHeader: View {
     @State private var showingMedications = false
     /// The time is the largest thing on screen; it still grows with the text-size setting.
     @ScaledMetric(relativeTo: .largeTitle) private var timeSize: CGFloat = 56
+    /// Tap the time to switch between "6:33 AM" and "06:33"; remembered between launches.
+    @AppStorage("use24HourClock") private var use24Hour = false
 
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
@@ -73,12 +75,32 @@ private struct HomeHeader: View {
     }
 
     private var timeText: some View {
-        Text(now.formatted(date: .omitted, time: .shortened))
-            .font(.system(size: timeSize, weight: .bold))
-            .monospacedDigit()
-            .foregroundStyle(.black)
-            .lineLimit(1)
-            .minimumScaleFactor(0.6)
+        Button {
+            withAnimation(.snappy(duration: 0.35)) { use24Hour.toggle() }
+        } label: {
+            Text(Self.clockText(now, use24Hour: use24Hour))
+                .font(.system(size: timeSize, weight: .bold))
+                .monospacedDigit()
+                .foregroundStyle(.black)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                // Digits roll into place instead of the text jumping.
+                .contentTransition(.numericText())
+        }
+        .buttonStyle(.plain)
+        .sensoryFeedback(.selection, trigger: use24Hour)
+        .accessibilityHint(use24Hour ? "Double tap to show AM and PM" : "Double tap to show 24-hour time")
+    }
+
+    /// "6:33 AM", or "06:33" / "18:33" in 24-hour time regardless of the phone's region.
+    static func clockText(_ date: Date, use24Hour: Bool) -> String {
+        guard use24Hour else { return date.formatted(date: .omitted, time: .shortened) }
+        let style = Date.VerbatimFormatStyle(
+            format: "\(hour: .twoDigits(clock: .twentyFourHour, hourCycle: .zeroBased)):\(minute: .twoDigits)",
+            timeZone: .current,
+            calendar: .current
+        )
+        return date.formatted(style)
     }
 }
 
@@ -148,17 +170,15 @@ private struct TodayCard: View {
 
     @ViewBuilder
     private func rows(_ items: [(dose: Dose, state: DoseState)]) -> some View {
-        let firstDoneIndex = items.firstIndex { !$0.state.isPending }
+        let firstTakenIndex = items.firstIndex { $0.state.isTaken }
+        let firstMissedIndex = items.firstIndex { $0.state == .missed }
 
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(items.enumerated()), id: \.element.dose.id) { index, item in
-                if index == firstDoneIndex {
-                    Text("Done")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Color(white: 0.45))
-                        .padding(.top, index == 0 ? 0 : 14)
-                        .padding(.bottom, 2)
-                        .accessibilityAddTraits(.isHeader)
+                if index == firstTakenIndex {
+                    sectionHeader("Taken", isFirst: index == 0)
+                } else if index == firstMissedIndex {
+                    sectionHeader("Missed", isFirst: index == 0)
                 } else if index > 0 {
                     Divider()
                 }
@@ -173,6 +193,17 @@ private struct TodayCard: View {
                 }
             }
         }
+    }
+}
+
+extension TodayCard {
+    fileprivate func sectionHeader(_ title: String, isFirst: Bool) -> some View {
+        Text(title)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(Color(white: 0.45))
+            .padding(.top, isFirst ? 0 : 14)
+            .padding(.bottom, 2)
+            .accessibilityAddTraits(.isHeader)
     }
 }
 
@@ -241,7 +272,7 @@ private struct DoseRow: View {
     }
 }
 
-/// "in 2 hr", "Now", "1 hr late", "Missed", or "Taken 8:02 AM".
+/// "in 2 hr", "Now", "1 hr late", "Missed", or the time it was taken ("8:02 AM").
 private struct DoseStatusText: View {
     let state: DoseState
     let scheduled: Date
@@ -258,10 +289,8 @@ private struct DoseStatusText: View {
         case .missed:
             label("Missed", color: Color(white: 0.45))
         case .taken(let time):
-            VStack(spacing: 0) {
-                label("Taken", color: Palette.taken, weight: .bold)
-                label(time.formatted(date: .omitted, time: .shortened), color: Palette.taken)
-            }
+            // The "Taken" section header says what this time means.
+            label(time.formatted(date: .omitted, time: .shortened), color: Palette.taken, weight: .bold)
         }
     }
 

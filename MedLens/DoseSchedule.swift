@@ -99,12 +99,13 @@ nonisolated enum DoseSchedule {
         return .late
     }
 
-    /// Today's list: doses still to take first (earliest on top), then taken and missed ones.
+    /// Today's list: doses still to take first (earliest on top), then taken, then missed.
     static func ordered(_ dayDoses: [Dose], takenAt: [String: Date], now: Date) -> [(dose: Dose, state: DoseState)] {
         let withStates = dayDoses.map { ($0, state(of: $0, among: dayDoses, takenAt: takenAt, now: now)) }
         let pending = withStates.filter { $0.1.isPending }
-        let done = withStates.filter { !$0.1.isPending }
-        return (pending + done).map { (dose: $0.0, state: $0.1) }
+        let taken = withStates.filter { $0.1.isTaken }
+        let missed = withStates.filter { $0.1 == .missed }
+        return (pending + taken + missed).map { (dose: $0.0, state: $0.1) }
     }
 
     /// Decides what a scan of `medication` should do now. Never checks more than one dose,
