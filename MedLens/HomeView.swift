@@ -9,12 +9,14 @@ import SwiftUI
 /// button, and today's doses.
 struct HomeView: View {
     let store: MedicationStore
+    /// Opens the "My Medications" page.
+    let onShowMedications: () -> Void
 
     var body: some View {
         // Redraw every minute so the clock and "in 2 hr" labels stay current.
         TimelineView(.everyMinute) { context in
             VStack(alignment: .leading, spacing: 20) {
-                HomeHeader(now: context.date, medications: store.medications)
+                HomeHeader(now: context.date, onShowMedications: onShowMedications)
                 TodayCard(store: store, now: context.date)
             }
         }
@@ -25,8 +27,7 @@ struct HomeView: View {
 
 private struct HomeHeader: View {
     let now: Date
-    let medications: [Medication]
-    @State private var showingMedications = false
+    let onShowMedications: () -> Void
     /// The time is the largest thing on screen; it still grows with the text-size setting.
     @ScaledMetric(relativeTo: .largeTitle) private var timeSize: CGFloat = 56
     /// Tap the time to switch between "6:33 AM" and "06:33"; remembered between launches.
@@ -43,25 +44,15 @@ private struct HomeHeader: View {
 
             Spacer(minLength: 8)
 
-            Button {
-                showingMedications.toggle()
-            } label: {
+            Button(action: onShowMedications) {
                 Image(systemName: "cross.vial.fill")
                     .font(.system(size: 24, weight: .semibold))
-                    .foregroundStyle(showingMedications ? .white : .black)
-                    .frame(width: 52, height: 52)
-                    .background {
-                        Circle().fill(showingMedications ? Color.black : Color(white: 0.94))
-                    }
+                    .foregroundStyle(.black)
+                    .frame(width: GlassButton.size, height: GlassButton.size)
+                    .modifier(GlassButtonBackground(shape: Circle()))
             }
+            .buttonStyle(.plain)
             .accessibilityLabel("My medications")
-            .popover(isPresented: $showingMedications, arrowEdge: .top) {
-                MedicationListPopover(medications: medications)
-                    // Show as a dropdown popover on iPhone too, not a full sheet.
-                    .presentationCompactAdaptation(.popover)
-                    // Solid, so the list behind doesn't show through and hurt readability.
-                    .presentationBackground(.white)
-            }
         }
     }
 
@@ -76,7 +67,7 @@ private struct HomeHeader: View {
 
     private var timeText: some View {
         Button {
-            withAnimation(.snappy(duration: 0.35)) { use24Hour.toggle() }
+            withAnimation(.easeInOut(duration: 0.2)) { use24Hour.toggle() }
         } label: {
             Text(Self.clockText(now, use24Hour: use24Hour))
                 .font(.system(size: timeSize, weight: .bold))
@@ -84,8 +75,8 @@ private struct HomeHeader: View {
                 .foregroundStyle(.black)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
-                // Digits roll into place instead of the text jumping.
-                .contentTransition(.numericText())
+                // A quick cross-fade between "6:33 AM" and "06:33".
+                .contentTransition(.opacity)
         }
         .buttonStyle(.plain)
         .sensoryFeedback(.selection, trigger: use24Hour)
@@ -278,7 +269,7 @@ private struct DoseStatusText: View {
     var body: some View {
         switch state {
         case .upcoming:
-            label("in \(Self.duration(scheduled.timeIntervalSince(now)))", color: Color(white: 0.4))
+            label("\(Self.duration(scheduled.timeIntervalSince(now)))", color: Color(white: 0.4))
         case .due:
             label("Now", color: Palette.due, weight: .bold)
         case .late:
@@ -319,52 +310,31 @@ private struct DoseStatusText: View {
     }
 }
 
-// MARK: - Registered medications dropdown
+// MARK: - Shared pieces
 
-private struct MedicationListPopover: View {
-    let medications: [Medication]
-
-    var body: some View {
-        ViewThatFits(in: .vertical) {
-            content
-            ScrollView { content }
-        }
-        .frame(width: 330)
-    }
-
-    private var content: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("My Medications")
-                .font(.title3.weight(.bold))
-                .padding(.bottom, 10)
-                .accessibilityAddTraits(.isHeader)
-
-            ForEach(Array(medications.enumerated()), id: \.element.id) { index, medication in
-                if index > 0 { Divider() }
-                HStack(spacing: 12) {
-                    PillImage(medication: medication, size: 44)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(medication.displayName)
-                            .font(.title3.weight(.semibold))
-                        Text(medication.doseTimes.sorted().map { timeText($0) }.joined(separator: " · "))
-                            .font(.body)
-                            .foregroundStyle(Color(white: 0.35))
-                    }
-                    Spacer(minLength: 0)
-                }
-                .padding(.vertical, 10)
-                .accessibilityElement(children: .combine)
-            }
-        }
-        .padding(18)
-    }
-
-    private func timeText(_ time: DoseTime) -> String {
-        time.date(on: Date()).formatted(date: .omitted, time: .shortened)
-    }
+enum GlassButton {
+    /// Height of the app's glass buttons (the system uses 44pt).
+    static let size: CGFloat = 56
 }
 
-// MARK: - Shared pieces
+/// The Liquid Glass look iOS uses for bar buttons (like the back button) on iOS 26 and
+/// later; a plain grey fill on earlier versions. Buttons using it are 56pt tall — larger
+/// than the system's 44pt so they are easier to see and tap.
+struct GlassButtonBackground<S: Shape>: ViewModifier {
+    let shape: S
+
+    func body(content: Content) -> some View {
+        if #available(iOS 26, *) {
+            content
+                .contentShape(shape)
+                .glassEffect(.regular.interactive(), in: shape)
+        } else {
+            content
+                .contentShape(shape)
+                .background(shape.fill(Color(white: 0.94)))
+        }
+    }
+}
 
 /// Placeholder medication picture: a coloured pill symbol on a soft tile.
 struct PillImage: View {
