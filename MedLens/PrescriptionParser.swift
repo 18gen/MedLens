@@ -24,18 +24,24 @@ nonisolated enum PrescriptionParser {
     /// The first line that reads like "<name> <strength>", e.g. "ATORVASTATIN 20 MG TABLET"
     /// → "ATORVASTATIN 20 MG". Returned exactly as read, without the dosage form.
     static func medicationName(in lines: [String]) -> String? {
-        for line in lines {
-            let text = line.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-            let words = Set(text.lowercased().split(whereSeparator: { !$0.isLetter }).map(String.init))
-            guard words.isDisjoint(with: nonNameWords),
-                  let strength = text.range(of: strengthPattern, options: [.regularExpression, .caseInsensitive])
-            else { continue }
+        lines.lazy.compactMap(nameCandidate).first
+    }
 
-            // Require a real word before the strength, not just a stray letter or two.
-            guard text[..<strength.lowerBound].filter(\.isLetter).count >= 3 else { continue }
-            return String(text[..<strength.upperBound])
-        }
-        return nil
+    /// Index of the line `medicationName(in:)` uses, for highlighting it on screen.
+    static func medicationLineIndex(in lines: [String]) -> Int? {
+        lines.firstIndex { nameCandidate(from: $0) != nil }
+    }
+
+    private static func nameCandidate(from line: String) -> String? {
+        let text = line.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        let words = Set(text.lowercased().split(whereSeparator: { !$0.isLetter }).map(String.init))
+        guard words.isDisjoint(with: nonNameWords),
+              let strength = text.range(of: strengthPattern, options: [.regularExpression, .caseInsensitive])
+        else { return nil }
+
+        // Require a real word before the strength, not just a stray letter or two.
+        guard text[..<strength.lowerBound].filter(\.isLetter).count >= 3 else { return nil }
+        return String(text[..<strength.upperBound])
     }
 
     // MARK: Frequency
@@ -88,6 +94,18 @@ nonisolated enum PrescriptionParser {
         case (nil, true): return "As needed"
         case (nil, false): return nil
         }
+    }
+
+    /// Indices of the lines that hold the frequency wording, for highlighting on screen.
+    /// Directions often wrap, so if no single line has it, adjacent pairs are checked.
+    static func frequencyLineIndices(in lines: [String]) -> [Int] {
+        guard frequency(in: lines) != nil else { return [] }
+        let single = lines.indices.filter { frequency(in: [lines[$0]]) != nil }
+        if !single.isEmpty { return single }
+        for index in lines.indices.dropLast() where frequency(in: [lines[index], lines[index + 1]]) != nil {
+            return [index, index + 1]
+        }
+        return []
     }
 
     private static func capitalizedFirst(_ text: String) -> String {
