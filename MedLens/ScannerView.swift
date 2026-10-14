@@ -37,16 +37,30 @@ struct CameraLens: View {
     /// Size of the camera view when open.
     let openSize: CGSize
 
+    /// Where the user last tapped to focus, shown briefly as a square.
+    @State private var focusMark: CGPoint?
+    @State private var focusTapCount = 0
+
     var body: some View {
         ZStack {
             Color.black
 
             if isOpen {
-                CameraPreview(session: model.session)
-                    .transition(.opacity)
+                CameraPreview(session: model.session) { devicePoint, viewPoint in
+                    model.focus(at: devicePoint)
+                    focusMark = viewPoint
+                    focusTapCount += 1
+                }
+                .transition(.opacity)
 
                 TextBoxOverlay(lines: model.lines, frameSize: model.frameSize)
                     .transition(.opacity)
+
+                if let focusMark {
+                    FocusMark()
+                        .position(focusMark)
+                        .transition(.scale(scale: 1.4).combined(with: .opacity))
+                }
 
                 if let message = model.cameraMessage {
                     Text(message)
@@ -67,6 +81,13 @@ struct CameraLens: View {
         .padding(.bottom, isOpen ? 10 : CameraButton.bottomInset)
         .ignoresSafeArea(edges: .bottom)
         .accessibilityHidden(!isOpen)
+        // Hide the focus square a moment after each tap.
+        .task(id: focusTapCount) {
+            guard focusMark != nil else { return }
+            try? await Task.sleep(for: .seconds(1))
+            withAnimation(.easeOut(duration: 0.3)) { focusMark = nil }
+        }
+        .animation(.easeOut(duration: 0.2), value: focusTapCount)
     }
 }
 
@@ -102,7 +123,7 @@ struct TextBoxOverlay: View {
             }
         }
         // Glide boxes between frames instead of jumping.
-        .animation(.easeOut(duration: 0.2), value: usedLines)
+        .animation(.easeOut(duration: 0.1), value: usedLines)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
@@ -126,21 +147,54 @@ struct TextBoxOverlay: View {
     }
 }
 
-/// Shows the live camera feed from an `AVCaptureSession`.
+/// Small square marking where the user tapped to focus, like the Camera app.
+struct FocusMark: View {
+    var body: some View {
+        RoundedRectangle(cornerRadius: 6, style: .continuous)
+            .stroke(Color.yellow, lineWidth: 1.5)
+            .frame(width: 72, height: 72)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+}
+
+/// Shows the live camera feed from an `AVCaptureSession`. Tapping it reports the point in
+/// camera device coordinates (for focusing) and in view coordinates (for the focus square).
 struct CameraPreview: UIViewRepresentable {
     let session: AVCaptureSession
+    var onTap: ((_ devicePoint: CGPoint, _ viewPoint: CGPoint) -> Void)?
 
     func makeUIView(context: Context) -> PreviewView {
         let view = PreviewView()
         view.previewLayer.session = session
         view.previewLayer.videoGravity = .resizeAspectFill
+        view.onTap = onTap
         return view
     }
 
-    func updateUIView(_ uiView: PreviewView, context: Context) {}
+    func updateUIView(_ uiView: PreviewView, context: Context) {
+        uiView.onTap = onTap
+    }
 
     final class PreviewView: UIView {
         override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
         var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
+        var onTap: ((CGPoint, CGPoint) -> Void)?
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(handleTap(_:))))
+        }
+
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) is not supported")
+        }
+
+        @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
+            let viewPoint = gesture.location(in: self)
+            // Accounts for the preview's rotation and aspect-fill crop.
+            let devicePoint = previewLayer.captureDevicePointConverted(fromLayerPoint: viewPoint)
+            onTap?(devicePoint, viewPoint)
+        }
     }
 }
