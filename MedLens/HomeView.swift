@@ -27,13 +27,15 @@ private struct HomeHeader: View {
     let now: Date
     let medications: [Medication]
     @State private var showingMedications = false
+    /// The time is the largest thing on screen; it still grows with the text-size setting.
+    @ScaledMetric(relativeTo: .largeTitle) private var timeSize: CGFloat = 56
 
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
-            // Side by side when there is room, stacked at large text sizes.
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .firstTextBaseline, spacing: 14) { dateText; timeText }
-                VStack(alignment: .leading, spacing: 2) { dateText; timeText }
+            // Like the Lock Screen: the date above, the time large below it.
+            VStack(alignment: .leading, spacing: 0) {
+                dateText
+                timeText
             }
             .accessibilityElement(children: .combine)
 
@@ -62,16 +64,21 @@ private struct HomeHeader: View {
     }
 
     private var dateText: some View {
-        Text(now.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
+        // Full words ("Wednesday, October 14") are easier to read than abbreviations.
+        Text(now.formatted(.dateTime.weekday(.wide).month(.wide).day()))
             .font(.title2.weight(.semibold))
             .foregroundStyle(Color(white: 0.25))
+            .lineLimit(2)
+            .minimumScaleFactor(0.8)
     }
 
     private var timeText: some View {
         Text(now.formatted(date: .omitted, time: .shortened))
-            .font(.largeTitle.weight(.bold))
+            .font(.system(size: timeSize, weight: .bold))
             .monospacedDigit()
             .foregroundStyle(.black)
+            .lineLimit(1)
+            .minimumScaleFactor(0.6)
     }
 }
 
@@ -177,23 +184,37 @@ private struct DoseRow: View {
     let now: Date
     let onToggle: () -> Void
 
+    /// Width of the checkbox + status column; grows with the text-size setting.
+    @ScaledMetric(relativeTo: .subheadline) private var statusColumnWidth: CGFloat = 76
+    @ScaledMetric(relativeTo: .title3) private var checkboxSize: CGFloat = 30
+    @Environment(\.dynamicTypeSize) private var typeSize
+
     private var timeText: String {
         dose.scheduled.formatted(date: .omitted, time: .shortened)
     }
 
     var body: some View {
         HStack(spacing: 12) {
+            // Checkbox with its status underneath ("in 2 hr" → "Taken 7:55 AM"),
+            // tappable as one large target.
             Button(action: onToggle) {
-                Image(systemName: state.isTaken ? "checkmark.square.fill" : "square")
-                    .font(.system(size: 30))
-                    .foregroundStyle(state.isTaken ? Palette.taken : Color(white: 0.3))
-                    .contentTransition(.symbolEffect(.replace))
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
+                VStack(spacing: 2) {
+                    Image(systemName: state.isTaken ? "checkmark.square.fill" : "square")
+                        .font(.system(size: checkboxSize))
+                        .foregroundStyle(state.isTaken ? Palette.taken : Color(white: 0.3))
+                        .contentTransition(.symbolEffect(.replace))
+                        .frame(height: checkboxSize + 6)
+                    DoseStatusText(state: state, scheduled: dose.scheduled, now: now)
+                }
+                .frame(width: statusColumnWidth)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
-            PillImage(medication: dose.medication, size: 48)
+            // At accessibility text sizes the picture gives its room to the name.
+            if !typeSize.isAccessibilitySize {
+                PillImage(medication: dose.medication, size: 48)
+            }
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(dose.medication.name)
@@ -206,9 +227,7 @@ private struct DoseRow: View {
                     .foregroundStyle(Color(white: 0.35))
             }
 
-            Spacer(minLength: 4)
-
-            DoseStatusText(state: state, scheduled: dose.scheduled, now: now)
+            Spacer(minLength: 0)
         }
         .padding(.vertical, 8)
         .opacity(state.isPending ? 1 : 0.75)
@@ -239,21 +258,21 @@ private struct DoseStatusText: View {
         case .missed:
             label("Missed", color: Color(white: 0.45))
         case .taken(let time):
-            VStack(alignment: .trailing, spacing: 0) {
+            VStack(spacing: 0) {
                 label("Taken", color: Palette.taken, weight: .bold)
-                Text(time.formatted(date: .omitted, time: .shortened))
-                    .font(.subheadline)
-                    .foregroundStyle(Palette.taken)
+                label(time.formatted(date: .omitted, time: .shortened), color: Palette.taken)
             }
         }
     }
 
     private func label(_ text: String, color: Color, weight: Font.Weight = .semibold) -> some View {
         Text(text)
-            .font(.headline.weight(weight))
+            .font(.subheadline.weight(weight))
             .foregroundStyle(color)
-            .multilineTextAlignment(.trailing)
-            .fixedSize()
+            .multilineTextAlignment(.center)
+            .lineLimit(2)
+            .minimumScaleFactor(0.85)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     /// Rounded to whole minutes under an hour, otherwise whole hours.
